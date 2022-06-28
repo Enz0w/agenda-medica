@@ -1,156 +1,184 @@
 using Microsoft.AspNetCore.Mvc;
 using AgendaMedica.Models;
+using AgendaMedica.Service;
 
 namespace AgendaMedica.Controllers;
 
 [ApiController]
-[Route("api/agenda")]
+[Route("api/agendas")]
 public class ScheduleController : ControllerBase
     {
-        private static int countId = 1;
+    private readonly IScheduleService _scheduleService;
+
+    public ScheduleController(IScheduleService scheduleService){
+        _scheduleService = scheduleService;
+    }  
     
-    private static List<Doutor> listaDoutores = new List<Doutor>(); 
-
-    private static List<Agenda> listaAgendamento = new List<Agenda>();
-
-    private static DateTime hoje = DateTime.Now;     
-
-    [HttpGet]
-    public string Get(){
-        return "Agendamento médico";
-    }
-
     [HttpGet("listarDoutores")]
-    public ActionResult<List<Doutor>> listaMedicos(){  
-        if(!listaDoutores.Any() || listaDoutores == null){
-            return StatusCode(200, "A lista de médicos está vazia.");
+    public ActionResult<List<Doutor>> listaMedicos(){ 
+        List<Doutor> lista = _scheduleService.listDocs(); 
+        if(!lista.Any()){
+            return NotFound("Nenhum médico encontrado.");
         }      
                   
-        return Ok(listaDoutores);
+        return Ok(lista);
+    }
+
+    // WIP
+
+    [HttpPatch("{CRM}/otimizar")]
+    public ActionResult<List<Agenda>[]> otimizarAgenda(int CRM){     
+        Doutor oldDoc = _scheduleService.getDoc(CRM);
+        try{
+            _scheduleService.optimize(CRM);
+        }
+        catch(ArgumentOutOfRangeException)
+        {
+            return StatusCode(500, "Esse médico não pode receber mais cirurgias.");
+        }
+        catch(ArgumentNullException)
+        {
+            return StatusCode(404, "Não foi possível remover o agendamento informado.");
+        }
+        catch(ArgumentException)
+        {
+            return StatusCode(500, "Informe uma data válida.");
+        } 
+        catch(IndexOutOfRangeException)
+        {
+            return StatusCode(400, "Esta agenda médica está cheia.");
+        }
+        catch(InvalidDataException)
+        {
+            return StatusCode(500, "Campos obrigatórios vazios ou inválidos.");
+        }
+        catch(NullReferenceException)
+        {
+            return StatusCode(404, "Médico e/ou agenda médica não encontrado(s).");
+        }
+        
+        return oldDoc.diario;
     }
 
     [HttpPost]
     public ActionResult<bool> adicionarMedico([FromBody]Doutor doc){   
-        if(doc == null){
+        try
+        {
+            _scheduleService.newDoc(doc);
+        }
+        catch(ArgumentNullException){
             return StatusCode(500, "Informe um objeto.");
-        }   
-        if(doc.nome == "" || doc.nome == null || doc.crm < 1000 || doc.crm > 9999){
+        }
+        catch(InvalidDataException){
             return StatusCode(500, "Campos obrigatórios vazios ou inválidos.");
-        }        
-        listaDoutores.Add(doc);
+        }
+        catch(InvalidOperationException){
+            return StatusCode(406, "Já existe um doutor com esse CRM.");
+        }
         return Ok(true);
     }
     
-    [HttpPost("agendar/{CRM}")]
-    public ActionResult<List<Agenda>> agendar(int CRM, [FromBody] Agenda agenda){
-        Doutor oldDoc = getDocByCRM(CRM);
-        
-        if(oldDoc == null){
-            return StatusCode(404, "Médico não encontrado.");
-        }
-        if(agenda == null || agenda.atendimento < 1 || agenda.atendimento > 2){
-            return StatusCode(204, "Campos obrigatórios vazios ou inválidos.");
-        }
-        if(oldDoc.diario.Count >= 5){
-            return StatusCode(500, "A agenda desse médico está cheia.");
-        }
-        if(agenda.atendimento == 2 && oldDoc.diario.Any(agenda => agenda.atendimento == 2)){
+    [HttpPost("{CRM}/agendar")]
+    public ActionResult<List<Agenda>[]> agendar(int CRM, [FromBody] Agenda agenda){                       
+        Doutor oldDoc = _scheduleService.getDoc(CRM);
+        try
+        {
+            _scheduleService.saveAttendance(CRM, agenda);               
+        }      
+        catch(ArgumentOutOfRangeException)
+        {
             return StatusCode(500, "Esse médico não pode receber mais cirurgias.");
-        }
-        if(agenda.dia < hoje || agenda.dia.DayOfWeek == DayOfWeek.Saturday || agenda.dia.DayOfWeek == DayOfWeek.Sunday){
+        }                   
+        catch(ArgumentException)
+        {
             return StatusCode(500, "Informe uma data válida.");
+        } 
+        catch(IndexOutOfRangeException)
+        {
+            return StatusCode(400, "Esta agenda médica está cheia.");
         }
-        else{
-            agenda.doutor = oldDoc.nome;
-            agenda.id = countId++;
-            oldDoc.diario.Add(agenda);
-            agenda.data = agenda.dia.ToString("dd-MM-yyyy");
-        }                          
+        catch(InvalidDataException)
+        {
+            return StatusCode(500, "Campos obrigatórios vazios ou inválidos.");
+        }
+        catch(NullReferenceException)
+        {
+            return StatusCode(404, "Médico e/ou agenda médica não encontrado(s).");
+        }
                                  
         return Ok(oldDoc.diario);
     }
 
     [HttpPatch("{CRM}/{Id}")]
-    public ActionResult<bool> alterarAgendamento(int CRM, int Id, Agenda agenda){
-        Doutor oldDoc = getDocByCRM(CRM);        
-        Agenda agendaDoc = getDayById(CRM, Id);
-        if(oldDoc == null){
-            return StatusCode(404, "Médico não encontrado.");
-        }
-        if(agendaDoc == null){
-            return StatusCode(404, "Agenda médica não encontrada.");
-        }
+    public ActionResult<bool> alterarAgendamento(int CRM, int Id, [FromBody] Agenda agenda){  
         if(agenda == null || agenda.dia == null){
-            return StatusCode(204, "Campos obrigatórios vazios ou inválidos");
+            return StatusCode(400, "Campos obrigatórios vazios ou inválidos.");
+        }   
+        try
+        {        
+            _scheduleService.changeAppointment(CRM, Id, agenda);            
         }
-        if(agenda.dia < hoje || agenda.dia.DayOfWeek == DayOfWeek.Saturday || agenda.dia.DayOfWeek == DayOfWeek.Sunday){
-            return StatusCode(500, "Informe uma data válida");
+        catch(ArgumentNullException)
+        {
+            return StatusCode(404, "Não foi possível remover o agendamento informado.");
         }
-        else{
-            agendaDoc.dia = agenda.dia;
-            agendaDoc.data = agenda.dia.ToString("dd-MM-yyyy");
+        catch(ArgumentOutOfRangeException)
+        {
+            return StatusCode(500, "Esse médico não pode receber mais cirurgias nesse dia.");
+        }           
+        catch(IndexOutOfRangeException)
+        {
+            return StatusCode(400, "A agenda médica desse dia está cheia.");
         }
+        catch(InvalidDataException)
+        {
+            return StatusCode(500, "Informe uma data válida.");
+        }
+        catch(NullReferenceException)
+        {
+            return StatusCode(404, "Médico e/ou agenda médica não encontrado(s).");
+        }
+                      
         return Ok(true);
     }        
 
     [HttpDelete("{CRM}")]
-    public ActionResult<bool> removerMedico(int CRM){
-        Doutor aux = null;
-        Doutor oldDoc = getDocByCRM(CRM);
-
-        if(oldDoc == null){
+    public ActionResult<bool> removerMedico(int CRM){      
+        try{
+            _scheduleService.deleteDoc(CRM);
+        }
+        catch(NullReferenceException)
+        {
             return StatusCode(404, "Médico não encontrado.");
         }
-        else{
-            aux = oldDoc;
+        catch(InvalidOperationException)
+        {
+            return StatusCode(400, "A agenda desse médico não está vazia.");
         }
-        if(aux != null){
-            listaDoutores.Remove(aux);
-            return Ok(true);
-        }
-        return NotFound(false);
+        return Ok(true);
     }
 
     [HttpDelete("{CRM}/{Id}")]
     public ActionResult<bool> cancelarAgendamento(int CRM, int Id){
-        Doutor oldDoc = getDocByCRM(CRM);
-        Agenda agendaDoc = getDayById(CRM, Id);
-        TimeSpan diferençaDias = agendaDoc.dia - hoje;
-        int totalDiff = diferençaDias.Days;      
-        if(oldDoc == null){
-            return StatusCode(404, "Médico não encontrado.");
+        try
+        {
+            _scheduleService.cancelAppointment(CRM, Id);
+        }              
+        catch(NullReferenceException)
+        {
+            return StatusCode(404, "Médico e/ou agenda médica não encontrado(s).");
         }
-        if(agendaDoc == null){
-            return StatusCode(404, "Agenda não encontrada.");
+        catch(ArgumentNullException)
+        {
+            return StatusCode(400, "Não foi possível remover o agendamento.");
         }
-        if(agendaDoc.atendimento == 1 && (totalDiff < 3)){
+        catch(SystemException)
+        {
             return StatusCode(500, "Só podem ser canceladas consultas com antecedência de 3 dias.");
         }
-        else{
-            oldDoc.diario.Remove(agendaDoc);
-            return Ok(true);
-        }
-    }
-
-    private Doutor getDocByCRM(int CRM){
-        foreach(Doutor doutor in listaDoutores){
-            if(doutor.crm == CRM){
-                return doutor;
-            }
-        }
-        return null;
-    }
-    private Agenda getDayById(int CRM, int Id){
-        Doutor oldDoc = getDocByCRM(CRM); 
-        if(oldDoc == null){
-            return null;
-        }        
-        List<Agenda> horarios = oldDoc.diario;    
-        foreach(Agenda horario in horarios){
-            if(horario.id == Id){
-                return horario;
-            }            
-        }
-        return null;
-    }
+                   
+        return Ok(true);
+        
+    } 
+    
 }
