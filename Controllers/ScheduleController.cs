@@ -24,41 +24,6 @@ public class ScheduleController : ControllerBase
         return Ok(lista);
     }
 
-    // WIP
-
-    [HttpPatch("{CRM}/otimizar")]
-    public ActionResult<List<Agenda>[]> otimizarAgenda(int CRM){     
-        Doutor oldDoc = _scheduleService.getDoc(CRM);
-        try{
-            _scheduleService.optimize(CRM);
-        }
-        catch(ArgumentOutOfRangeException)
-        {
-            return StatusCode(500, "Esse médico não pode receber mais cirurgias.");
-        }
-        catch(ArgumentNullException)
-        {
-            return StatusCode(404, "Não foi possível remover o agendamento informado.");
-        }
-        catch(ArgumentException)
-        {
-            return StatusCode(500, "Informe uma data válida.");
-        } 
-        catch(IndexOutOfRangeException)
-        {
-            return StatusCode(400, "Esta agenda médica está cheia.");
-        }
-        catch(InvalidDataException)
-        {
-            return StatusCode(500, "Campos obrigatórios vazios ou inválidos.");
-        }
-        catch(NullReferenceException)
-        {
-            return StatusCode(404, "Médico e/ou agenda médica não encontrado(s).");
-        }
-        
-        return oldDoc.diario;
-    }
 
     [HttpPost]
     public ActionResult<bool> adicionarMedico([FromBody]Doutor doc){   

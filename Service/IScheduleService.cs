@@ -8,7 +8,6 @@ public interface IScheduleService
     bool deleteDoc(int CRM);
     bool changeAppointment(int CRM, int Id, Agenda agenda);
     bool cancelAppointment(int CRM, int Id);
-    List<Agenda>[] optimize(int CRM);
     List<Doutor> listDocs();
     Doutor getDoc(int CRM);
     Agenda getAppointment(int CRM, int Id);
